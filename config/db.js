@@ -5,12 +5,14 @@ const connectDB = async () => {
   try {
     const mongoUrl = process.env.MONGODB_URL || 'mongodb+srv://chetan:chetan3625@chetan.av9qawd.mongodb.net/CHETAN?appName=CHETAN&w=majority';
     console.log('Connecting to MongoDB...');
-    const conn = await mongoose.connect(mongoUrl);
+    const conn = await mongoose.connect(mongoUrl, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`MongoDB Error: ${error.message}`);
-    console.error('Make sure:\n1. MongoDB Atlas cluster is not paused\n2. Your IP is whitelisted in Atlas\n3. Username/password is correct');
-    process.exit(1);
+    console.log('Note: Server will continue without database until connection is restored');
   }
 };
 
