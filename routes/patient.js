@@ -1,0 +1,38 @@
+const express = require('express');
+const router = express.Router();
+const { patientController } = require('../controllers');
+const { protect } = require('../middleware/auth');
+const { authorize } = require('../middleware/role');
+const { ROLES } = require('../config/constants');
+
+router.use(protect);
+router.use(authorize(ROLES.PATIENT));
+
+router.get('/profile', patientController.getProfile);
+router.put('/profile', patientController.updateProfile);
+router.get('/doctors', patientController.getDoctors);
+router.get('/doctors/:id', patientController.getDoctorProfile);
+router.post('/appointments', patientController.bookAppointment);
+router.get('/appointments', patientController.getAppointments);
+router.get('/appointments/:id', patientController.getAppointmentDetails);
+router.put('/appointments/:id/cancel', patientController.cancelAppointment);
+router.get('/prescriptions', patientController.getPrescriptions);
+router.get('/chats', patientController.getChats);
+router.get('/chats/:chatId/messages', patientController.getMessages);
+router.get('/blogs', patientController.getBlogs);
+router.get('/blogs/:id', patientController.getBlogDetails);
+router.put('/blogs/:id/like', patientController.likeBlog);
+router.post('/blogs/:id/comment', patientController.commentBlog);
+router.post('/feedback', patientController.addFeedback);
+router.get('/medicines', patientController.getMedicines);
+router.post('/cart', patientController.addToCart);
+router.get('/cart', patientController.getCart);
+router.put('/cart', patientController.updateCartItem);
+router.delete('/cart/:itemId', patientController.removeCartItem);
+router.post('/orders', patientController.placeOrder);
+router.get('/orders', patientController.getOrders);
+router.get('/orders/:id', patientController.getOrderDetails);
+router.get('/notifications', patientController.getNotifications);
+router.put('/notifications/:id/read', patientController.markNotificationRead);
+
+module.exports = router;

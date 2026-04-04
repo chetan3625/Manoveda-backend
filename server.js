@@ -1,0 +1,67 @@
+const express = require('express');
+const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
+const connectDB = require('./config/db');
+const { PORT } = require('./config/constants');
+const { errorHandler, notFound } = require('./middleware/error');
+const { initializeSocket } = require('./socket/socket');
+const {
+  authRoutes,
+  adminRoutes,
+  doctorRoutes,
+  patientRoutes,
+  medicalKeeperRoutes,
+  chatRoutes,
+  paymentRoutes
+} = require('./routes');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+connectDB();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Manoveda API Server',
+    version: '1.0.0',
+    endpoints: {
+      auth: '/api/auth',
+      admin: '/api/admin',
+      doctor: '/api/doctor',
+      patient: '/api/patient',
+      medicalKeeper: '/api/medical-keeper',
+      chat: '/api/chat',
+      payment: '/api/payment'
+    }
+  });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/doctor', doctorRoutes);
+app.use('/api/patient', patientRoutes);
+app.use('/api/medical-keeper', medicalKeeperRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/payment', paymentRoutes);
+
+app.use(notFound);
+app.use(errorHandler);
+
+initializeSocket(io);
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Socket.io initialized`);
+});
