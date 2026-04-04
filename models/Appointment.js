@@ -44,7 +44,8 @@ const appointmentSchema = new mongoose.Schema({
     type: String
   },
   prescription: {
-    type: String
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Prescription'
   },
   fee: {
     type: Number,

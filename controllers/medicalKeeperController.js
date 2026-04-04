@@ -210,28 +210,35 @@ exports.getOrders = async (req, res, next) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
 
-    const query = { 'items.medicine.addedBy': req.user.id };
+    const baseQuery = {};
     if (status) {
-      query.status = status;
+      baseQuery.status = status;
     }
 
-    const orders = await Order.find(query)
+    const allOrders = await Order.find(baseQuery)
       .populate('user', 'name email phone')
       .populate('items.medicine')
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit))
       .sort('-createdAt');
 
-    const total = await Order.countDocuments(query);
+    const matchingOrders = allOrders.filter(order =>
+      order.items.some(item => item.medicine?.addedBy?.toString() === req.user.id.toString())
+    );
+
+    const numericPage = parseInt(page, 10);
+    const numericLimit = parseInt(limit, 10);
+    const paginatedOrders = matchingOrders.slice(
+      (numericPage - 1) * numericLimit,
+      numericPage * numericLimit
+    );
 
     res.json({
       success: true,
-      orders,
+      orders: paginatedOrders,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
+        page: numericPage,
+        limit: numericLimit,
+        total: matchingOrders.length,
+        pages: Math.ceil(matchingOrders.length / numericLimit)
       }
     });
   } catch (error) {
@@ -291,6 +298,17 @@ exports.getOrderDetails = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Order not found'
+      });
+    }
+
+    const ownsAtLeastOneItem = order.items.some(
+      item => item.medicine?.addedBy?.toString() === req.user.id.toString()
+    );
+
+    if (!ownsAtLeastOneItem) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to access this order'
       });
     }
 

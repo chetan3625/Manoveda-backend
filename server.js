@@ -26,7 +26,7 @@ const io = new Server(server, {
   }
 });
 
-connectDB().catch(err => console.log('MongoDB connection error (will retry):', err.message));
+connectDB();
 
 app.use(cors({
   origin: '*',

@@ -1,5 +1,11 @@
 const { Chat, Message, User } = require('../models');
 
+const isChatParticipant = (chat, userId) => {
+  return chat.participants.some(
+    participant => participant.toString() === userId.toString()
+  );
+};
+
 exports.createChat = async (req, res, next) => {
   try {
     const { participantId } = req.body;
@@ -70,7 +76,7 @@ exports.getMessages = async (req, res, next) => {
       });
     }
 
-    if (!chat.participants.includes(req.user.id) && !chat.isGroup) {
+    if (!isChatParticipant(chat, req.user.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to access this chat'
@@ -119,7 +125,7 @@ exports.sendMessage = async (req, res, next) => {
       });
     }
 
-    if (!chat.participants.includes(req.user.id) && !chat.isGroup) {
+    if (!isChatParticipant(chat, req.user.id)) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to send message to this chat'
@@ -219,7 +225,7 @@ exports.addGroupMember = async (req, res, next) => {
       });
     }
 
-    if (!chat.participants.includes(userId)) {
+    if (!isChatParticipant(chat, userId)) {
       chat.participants.push(userId);
       await chat.save();
     }

@@ -11,7 +11,7 @@ exports.createOrder = async (req, res, next) => {
   try {
     const { amount, currency = 'INR', type } = req.body;
 
-    constrazorpayOrder = await razorpay.orders.create({
+    const razorpayOrder = await razorpay.orders.create({
       amount: amount * 100,
       currency,
       receipt: `receipt_${Date.now()}`
@@ -21,6 +21,7 @@ exports.createOrder = async (req, res, next) => {
       user: req.user.id,
       amount,
       currency,
+      method: type === 'cod' ? 'cod' : undefined,
       razorpayOrderId: razorpayOrder.id
     });
 
@@ -57,7 +58,7 @@ exports.verifyPayment = async (req, res, next) => {
         status: 'completed',
         razorpayPaymentId,
         razorpaySignature,
-        paymentId: razorpayPaymentId
+        transactionId: razorpayPaymentId
       },
       { new: true }
     );
