@@ -12,6 +12,7 @@ module.exports = {
     COMPLETED: 'completed',
     CANCELLED: 'cancelled'
   },
+  
 
   ORDER_STATUS: {
     PENDING: 'pending',
