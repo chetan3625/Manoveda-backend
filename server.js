@@ -26,8 +26,6 @@ const io = new Server(server, {
   }
 });
 
-connectDB();
-
 app.use(cors({
   origin: '*',
   credentials: true
@@ -69,7 +67,18 @@ app.use(errorHandler);
 
 initializeSocket(io);
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Socket.io initialized`);
-});
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log('Socket.io initialized');
+    });
+  } catch (error) {
+    console.error(`Failed to start server: ${error.message}`);
+    process.exit(1);
+  }
+};
+
+startServer();
