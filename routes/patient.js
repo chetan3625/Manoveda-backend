@@ -34,5 +34,7 @@ router.get('/orders', patientController.getOrders);
 router.get('/orders/:id', patientController.getOrderDetails);
 router.get('/notifications', patientController.getNotifications);
 router.put('/notifications/:id/read', patientController.markNotificationRead);
+router.get('/medical-keepers', patientController.getMedicalKeepers);
+router.get('/medical-keeper/:keeperId/medicines', patientController.getMedicalKeeperMedicines);
 
 module.exports = router;

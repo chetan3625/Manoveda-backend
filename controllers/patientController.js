@@ -484,7 +484,7 @@ exports.getMedicines = async (req, res, next) => {
 
 exports.addToCart = async (req, res, next) => {
   try {
-    const { medicineId, quantity = 1 } = req.body;
+    const { medicineId, keeperId, quantity = 1 } = req.body;
 
     const medicine = await Medicine.findById(medicineId);
 
@@ -492,6 +492,13 @@ exports.addToCart = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Medicine not found'
+      });
+    }
+
+    if (keeperId && medicine.addedBy.toString() !== keeperId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Medicine not available from this store'
       });
     }
 
@@ -748,6 +755,64 @@ exports.markNotificationRead = async (req, res, next) => {
 
     res.json({
       success: true
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getMedicalKeepers = async (req, res, next) => {
+  try {
+    const { city, search } = req.query;
+
+    const query = { role: ROLES.MEDICAL_KEEPER };
+    if (search) {
+      query.name = { $regex: search, $options: 'i' };
+    }
+    if (city) {
+      query['address.city'] = { $regex: city, $options: 'i' };
+    }
+
+    const keepers = await User.find(query)
+      .select('-password')
+      .sort('-createdAt');
+
+    res.json({
+      success: true,
+      keepers
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getMedicalKeeperMedicines = async (req, res, next) => {
+  try {
+    const { keeperId } = req.params;
+    const { search, category } = req.query;
+
+    const keeper = await User.findOne({ _id: keeperId, role: ROLES.MEDICAL_KEEPER });
+    if (!keeper) {
+      return res.status(404).json({
+        success: false,
+        message: 'Medical keeper not found'
+      });
+    }
+
+    const medicineQuery = { addedBy: keeperId };
+    if (search) {
+      medicineQuery.name = { $regex: search, $options: 'i' };
+    }
+    if (category) {
+      medicineQuery.category = category;
+    }
+
+    const medicines = await Medicine.find(medicineQuery)
+      .sort('-createdAt');
+
+    res.json({
+      success: true,
+      medicines
     });
   } catch (error) {
     next(error);
