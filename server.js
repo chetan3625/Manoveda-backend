@@ -3,6 +3,7 @@ const cors = require('cors');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const { PORT } = require('./config/constants');
 const { errorHandler, notFound } = require('./middleware/error');
@@ -16,6 +17,9 @@ const {
   chatRoutes,
   paymentRoutes
 } = require('./routes');
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
