@@ -142,6 +142,13 @@ exports.createAppointmentPayment = async (req, res, next) => {
       });
     }
 
+    if (appointment.fee <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid appointment fee. Please contact support.'
+      });
+    }
+
     const razorpayOrder = await razorpay.orders.create({
       amount: appointment.fee * 100,
       currency: 'INR',
@@ -183,6 +190,13 @@ exports.createOrderPayment = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'Not authorized'
+      });
+    }
+
+    if (order.totalAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid order amount. Please contact support.'
       });
     }
 
