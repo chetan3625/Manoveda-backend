@@ -8,7 +8,7 @@ const generateToken = (id) => {
 
 exports.register = async (req, res, next) => {
   try {
-    const { name, email, password, role, phone, specialization, experience, qualification } = req.body;
+    const { name, email, password, role, phone, specialization, experience, qualification, consultationFee } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -19,6 +19,16 @@ exports.register = async (req, res, next) => {
 
     const allowedRoles = [ROLES.DOCTOR, ROLES.PATIENT, ROLES.MEDICAL_KEEPER];
     const userRole = allowedRoles.includes(role) ? role : ROLES.PATIENT;
+
+    // Validate consultation fee for doctors
+    if (userRole === ROLES.DOCTOR) {
+      if (!consultationFee || consultationFee <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid consultation fee for doctors'
+        });
+      }
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -36,7 +46,8 @@ exports.register = async (req, res, next) => {
       phone,
       specialization,
       experience,
-      qualification
+      qualification,
+      consultationFee: userRole === ROLES.DOCTOR ? consultationFee : 0
     });
 
     const token = generateToken(user._id);
