@@ -50,6 +50,11 @@ const initializeSocket = (socketIo) => {
           return;
         }
 
+        if (chat.isUnlocked === false) {
+          socket.emit('error', { message: 'Chat is locked until the appointment is confirmed and paid' });
+          return;
+        }
+
         const message = await Message.create({
           chat: chatId,
           sender: socket.user._id,
@@ -125,21 +130,23 @@ const initializeSocket = (socketIo) => {
   });
 };
 
-const sendNotification = async (userId, title, message, type, referenceId) => {
-  if (io) {
-    await Notification.create({
-      user: userId,
-      title,
-      message,
-      type,
-      referenceId
-    });
+const sendNotification = async (userId, title, message, type, referenceId, data) => {
+  await Notification.create({
+    user: userId,
+    title,
+    message,
+    type,
+    referenceId,
+    data
+  });
 
+  if (io) {
     io.to(`user_${userId}`).emit('notification', {
       title,
       message,
       type,
       referenceId,
+      data,
       createdAt: new Date()
     });
   }

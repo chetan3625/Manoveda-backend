@@ -25,5 +25,7 @@ router.get('/blogs', doctorController.getMyBlogs);
 router.get('/feedbacks', doctorController.getFeedbacks);
 router.post('/medicines', doctorController.addMedicine);
 router.get('/availability', doctorController.getAvailability);
+router.get('/notifications', doctorController.getNotifications);
+router.put('/notifications/:id/read', doctorController.markNotificationRead);
 
 module.exports = router;

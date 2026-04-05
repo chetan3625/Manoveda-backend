@@ -1,5 +1,7 @@
 const { Payment, Order, Appointment, User } = require('../models');
-const { ROLES } = require('../config/constants');
+const { ROLES, APPOINTMENT_STATUS } = require('../config/constants');
+const { sendNotification } = require('../socket/socket');
+const { createOrUnlockAppointmentChat } = require('../utils/appointmentFlow');
 
 const Razorpay = require('razorpay');
 const razorpay = new Razorpay({
@@ -21,7 +23,7 @@ exports.createOrder = async (req, res, next) => {
       user: req.user.id,
       amount,
       currency,
-      method: type === 'cod' ? 'cod' : undefined,
+      method: type === 'cod' ? 'cod' : 'razorpay',
       razorpayOrderId: razorpayOrder.id
     });
 
@@ -64,10 +66,35 @@ exports.verifyPayment = async (req, res, next) => {
     );
 
     if (type === 'appointment' && appointmentId) {
-      await Appointment.findByIdAndUpdate(appointmentId, {
-        paymentStatus: 'paid',
-        status: 'confirmed'
-      });
+      const appointment = await Appointment.findByIdAndUpdate(
+        appointmentId,
+        { paymentStatus: 'paid' },
+        { new: true }
+      );
+
+      if (appointment) {
+        if (appointment.status === APPOINTMENT_STATUS.ACCEPTED) {
+          appointment.status = APPOINTMENT_STATUS.CONFIRMED;
+          await appointment.save();
+          await createOrUnlockAppointmentChat(appointment._id);
+        }
+
+        await sendNotification(
+          appointment.patient,
+          'Payment Successful',
+          'Your consultation payment has been recorded.',
+          'payment',
+          appointment._id
+        );
+
+        await sendNotification(
+          appointment.doctor,
+          'Consultation Paid',
+          'A patient completed payment for an appointment request.',
+          'payment',
+          appointment._id
+        );
+      }
     }
 
     if (type === 'order' && orderId) {
@@ -108,6 +135,13 @@ exports.createAppointmentPayment = async (req, res, next) => {
       });
     }
 
+    if (![APPOINTMENT_STATUS.ACCEPTED, APPOINTMENT_STATUS.CONFIRMED].includes(appointment.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment becomes available after the doctor accepts the request'
+      });
+    }
+
     const razorpayOrder = await razorpay.orders.create({
       amount: appointment.fee * 100,
       currency: 'INR',
@@ -118,6 +152,7 @@ exports.createAppointmentPayment = async (req, res, next) => {
       user: req.user.id,
       appointment: appointmentId,
       amount: appointment.fee,
+      method: 'razorpay',
       razorpayOrderId: razorpayOrder.id
     });
 

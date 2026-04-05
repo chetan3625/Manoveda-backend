@@ -1,5 +1,6 @@
 const { User, Appointment, Chat, Message, Blog, Feedback, Order, Prescription, Notification, Medicine, Payment } = require('../models');
-const { ROLES } = require('../config/constants');
+const { ROLES, APPOINTMENT_STATUS } = require('../config/constants');
+const { sendNotification } = require('../socket/socket');
 
 exports.getProfile = async (req, res, next) => {
   try {
@@ -102,7 +103,7 @@ exports.getDoctorProfile = async (req, res, next) => {
 
 exports.bookAppointment = async (req, res, next) => {
   try {
-    const { doctorId, date, time, duration, type, symptoms } = req.body;
+    const { doctorId, date, time, duration, type, symptoms, consultationMode = 'scheduled' } = req.body;
 
     const doctor = await User.findById(doctorId);
     if (!doctor || doctor.role !== ROLES.DOCTOR) {
@@ -117,7 +118,7 @@ exports.bookAppointment = async (req, res, next) => {
       patient: req.user.id,
       date,
       time,
-      status: { $in: ['pending', 'confirmed'] }
+      status: { $in: [APPOINTMENT_STATUS.PENDING, APPOINTMENT_STATUS.ACCEPTED, APPOINTMENT_STATUS.CONFIRMED] }
     });
 
     if (existingAppointment) {
@@ -134,24 +135,27 @@ exports.bookAppointment = async (req, res, next) => {
       time,
       duration,
       type,
+      consultationMode,
       symptoms,
       fee: doctor.consultationFee
     });
 
     const populatedAppointment = await Appointment.findById(appointment._id)
       .populate('doctor', 'name email specialization')
-      .populate('patient', 'name email');
+      .populate('patient', 'name email')
+      .populate('chat');
 
-    await Notification.create({
-      user: doctorId,
-      title: 'New Appointment',
-      message: 'You have a new appointment request',
-      type: 'appointment',
-      referenceId: appointment._id
-    });
+    await sendNotification(
+      doctorId,
+      'New Appointment Request',
+      `${req.user.name} requested a ${type} consultation.`,
+      'appointment',
+      appointment._id
+    );
 
     res.status(201).json({
       success: true,
+      message: 'Appointment request sent. Waiting for doctor approval.',
       appointment: populatedAppointment
     });
   } catch (error) {
@@ -170,6 +174,8 @@ exports.getAppointments = async (req, res, next) => {
 
     const appointments = await Appointment.find(query)
       .populate('doctor', 'name email specialization avatar consultationFee')
+      .populate('chat')
+      .populate('prescription')
       .sort('-date -time');
 
     res.json({
@@ -186,7 +192,9 @@ exports.getAppointmentDetails = async (req, res, next) => {
     const { id } = req.params;
 
     const appointment = await Appointment.findOne({ _id: id, patient: req.user.id })
-      .populate('doctor', 'name email specialization avatar consultationFee');
+      .populate('doctor', 'name email specialization avatar consultationFee')
+      .populate('chat')
+      .populate('prescription');
 
     if (!appointment) {
       return res.status(404).json({
@@ -217,23 +225,23 @@ exports.cancelAppointment = async (req, res, next) => {
       });
     }
 
-    if (appointment.status === 'completed') {
+    if ([APPOINTMENT_STATUS.COMPLETED, APPOINTMENT_STATUS.REJECTED].includes(appointment.status)) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot cancel completed appointment'
+        message: 'This appointment can no longer be cancelled'
       });
     }
 
-    appointment.status = 'cancelled';
+    appointment.status = APPOINTMENT_STATUS.CANCELLED;
     await appointment.save();
 
-    await Notification.create({
-      user: appointment.doctor,
-      title: 'Appointment Cancelled',
-      message: 'Your patient has cancelled the appointment',
-      type: 'appointment',
-      referenceId: appointment._id
-    });
+    await sendNotification(
+      appointment.doctor,
+      'Appointment Cancelled',
+      'Your patient has cancelled the appointment request.',
+      'appointment',
+      appointment._id
+    );
 
     res.json({
       success: true,
@@ -248,6 +256,7 @@ exports.getPrescriptions = async (req, res, next) => {
   try {
     const prescriptions = await Prescription.find({ patient: req.user.id })
       .populate('doctor', 'name email specialization')
+      .populate('appointment')
       .sort('-createdAt');
 
     res.json({

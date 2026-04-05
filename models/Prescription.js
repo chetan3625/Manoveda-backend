@@ -15,6 +15,10 @@ const prescriptionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Appointment'
   },
+  diagnosis: {
+    type: String,
+    required: true
+  },
   medicines: [{
     name: String,
     dosage: String,
@@ -23,6 +27,12 @@ const prescriptionSchema = new mongoose.Schema({
     instructions: String
   }],
   notes: {
+    type: String
+  },
+  pdfPath: {
+    type: String
+  },
+  pdfUrl: {
     type: String
   },
   followUpDate: {

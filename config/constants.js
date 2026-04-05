@@ -8,6 +8,8 @@ module.exports = {
 
   APPOINTMENT_STATUS: {
     PENDING: 'pending',
+    ACCEPTED: 'accepted',
+    REJECTED: 'rejected',
     CONFIRMED: 'confirmed',
     COMPLETED: 'completed',
     CANCELLED: 'cancelled'

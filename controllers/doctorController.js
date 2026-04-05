@@ -1,6 +1,9 @@
 const { User, Appointment, Chat, Message, Blog, Feedback, Prescription, Notification, Medicine } = require('../models');
-const { ROLES } = require('../config/constants');
+const { ROLES, APPOINTMENT_STATUS } = require('../config/constants');
 const { v4: uuidv4 } = require('uuid');
+const { sendNotification } = require('../socket/socket');
+const { createOrUnlockAppointmentChat } = require('../utils/appointmentFlow');
+const { generatePrescriptionPdf } = require('../utils/pdfGenerator');
 
 exports.getProfile = async (req, res, next) => {
   try {
@@ -73,6 +76,8 @@ exports.getAppointments = async (req, res, next) => {
 
     const appointments = await Appointment.find(query)
       .populate('patient', 'name email avatar phone')
+      .populate('chat')
+      .populate('prescription')
       .sort('date time');
 
     res.json({
@@ -87,7 +92,7 @@ exports.getAppointments = async (req, res, next) => {
 exports.updateAppointment = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, notes, prescription, meetingLink } = req.body;
+    const { status, notes, prescription, meetingLink, rejectionReason } = req.body;
 
     const appointment = await Appointment.findOne({ _id: id, doctor: req.user.id });
 
@@ -98,23 +103,49 @@ exports.updateAppointment = async (req, res, next) => {
       });
     }
 
-    if (status) appointment.status = status;
+    if (status) {
+      appointment.status = status;
+      appointment.doctorDecisionAt = new Date();
+      if (status === APPOINTMENT_STATUS.REJECTED) {
+        appointment.rejectionReason = rejectionReason || 'Doctor rejected the request';
+      }
+      if (status === APPOINTMENT_STATUS.ACCEPTED && appointment.paymentStatus === 'paid') {
+        appointment.status = APPOINTMENT_STATUS.CONFIRMED;
+      }
+    }
     if (notes) appointment.notes = notes;
     if (prescription) appointment.prescription = prescription;
     if (meetingLink) appointment.meetingLink = meetingLink;
 
     await appointment.save();
 
-    await Notification.create({
-      user: appointment.patient,
-      title: 'Appointment Updated',
-      message: `Your appointment has been ${status}`,
-      type: 'appointment',
-      referenceId: appointment._id
-    });
+    if (appointment.status === APPOINTMENT_STATUS.CONFIRMED) {
+      const chat = await createOrUnlockAppointmentChat(appointment._id);
+      if (chat) {
+        appointment.chat = chat._id;
+        await appointment.save();
+      }
+    }
+
+    const statusMessage = appointment.status === APPOINTMENT_STATUS.REJECTED
+      ? `Your appointment request was rejected. ${appointment.rejectionReason || ''}`.trim()
+      : appointment.status === APPOINTMENT_STATUS.ACCEPTED
+        ? 'Your doctor accepted the request. Complete payment to unlock chat and consultation.'
+        : appointment.status === APPOINTMENT_STATUS.CONFIRMED
+          ? 'Your appointment is confirmed. Chat and consultation are now unlocked.'
+          : `Your appointment has been updated to ${appointment.status}.`;
+
+    await sendNotification(
+      appointment.patient,
+      'Appointment Updated',
+      statusMessage,
+      'appointment',
+      appointment._id
+    );
 
     res.json({
       success: true,
+      message: 'Appointment updated successfully',
       appointment
     });
   } catch (error) {
@@ -125,8 +156,8 @@ exports.updateAppointment = async (req, res, next) => {
 exports.createMeetingLink = async (req, res, next) => {
   try {
     const { appointmentId } = req.body;
-    const meetingId = uuidv4();
-    const meetingLink = `https://meet.manoveda.in/${meetingId}`;
+    const meetingId = `manoveda-${uuidv4()}`;
+    const meetingLink = `https://meet.jit.si/${meetingId}`;
 
     const appointment = await Appointment.findOneAndUpdate(
       { _id: appointmentId, doctor: req.user.id },
@@ -141,14 +172,21 @@ exports.createMeetingLink = async (req, res, next) => {
       });
     }
 
-    await Notification.create({
-      user: appointment.patient,
-      title: 'Meeting Link Created',
-      message: 'Your doctor has created a meeting link for your appointment',
-      type: 'appointment',
-      referenceId: appointment._id,
-      data: { meetingLink }
-    });
+    if (appointment.status !== APPOINTMENT_STATUS.CONFIRMED || appointment.paymentStatus !== 'paid') {
+      return res.status(400).json({
+        success: false,
+        message: 'Meeting links can only be created for paid and confirmed appointments'
+      });
+    }
+
+    await sendNotification(
+      appointment.patient,
+      'Meeting Link Created',
+      'Your doctor created a video consultation link.',
+      'appointment',
+      appointment._id,
+      { meetingLink }
+    );
 
     res.json({
       success: true,
@@ -161,31 +199,68 @@ exports.createMeetingLink = async (req, res, next) => {
 
 exports.writePrescription = async (req, res, next) => {
   try {
-    const { patientId, appointmentId, medicines, notes, followUpDate } = req.body;
+    const { patientId, appointmentId, diagnosis, medicines, notes, followUpDate } = req.body;
+
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      doctor: req.user.id,
+      patient: patientId
+    }).populate('patient', 'name').populate('doctor', 'name specialization');
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (appointment.status !== APPOINTMENT_STATUS.CONFIRMED && appointment.status !== APPOINTMENT_STATUS.COMPLETED) {
+      return res.status(400).json({
+        success: false,
+        message: 'Prescription can only be generated for accepted paid consultations'
+      });
+    }
 
     const prescription = await Prescription.create({
       patient: patientId,
       doctor: req.user.id,
       appointment: appointmentId,
+      diagnosis,
       medicines,
       notes,
       followUpDate
     });
 
-    await Appointment.findByIdAndUpdate(appointmentId, {
-      prescription: prescription._id
+    const pdfResult = await generatePrescriptionPdf({
+      prescription,
+      appointment,
+      doctor: {
+        name: req.user.name,
+        specialization: req.user.specialization
+      },
+      patient: appointment.patient
     });
 
-    await Notification.create({
-      user: patientId,
-      title: 'New Prescription',
-      message: 'Your doctor has written a prescription for you',
-      type: 'appointment',
-      referenceId: prescription._id
+    prescription.pdfPath = pdfResult.filePath;
+    prescription.pdfUrl = pdfResult.publicUrl;
+    await prescription.save();
+
+    await Appointment.findByIdAndUpdate(appointmentId, {
+      prescription: prescription._id,
+      status: APPOINTMENT_STATUS.COMPLETED
     });
+
+    await sendNotification(
+      patientId,
+      'New Prescription',
+      'Your doctor has uploaded a prescription PDF for this consultation.',
+      'appointment',
+      prescription._id
+    );
 
     res.status(201).json({
       success: true,
+      message: 'Prescription created successfully',
       prescription
     });
   } catch (error) {
@@ -357,6 +432,38 @@ exports.getFeedbacks = async (req, res, next) => {
   }
 };
 
+exports.getNotifications = async (req, res, next) => {
+  try {
+    const notifications = await Notification.find({ user: req.user.id })
+      .sort('-createdAt')
+      .limit(30);
+
+    res.json({
+      success: true,
+      notifications
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.markNotificationRead = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    await Notification.findOneAndUpdate(
+      { _id: id, user: req.user.id },
+      { isRead: true }
+    );
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.addMedicine = async (req, res, next) => {
   try {
     const { name, category, description, composition, manufacturer, price, discountedPrice, stock, unit, requiresPrescription, imageUrl, dosage, sideEffects, warnings } = req.body;
@@ -399,7 +506,7 @@ exports.getAvailability = async (req, res, next) => {
     const appointments = await Appointment.find({
       doctor: req.user.id,
       date: { $gte: startDate, $lt: endDate },
-      status: { $in: ['pending', 'confirmed'] }
+      status: { $in: [APPOINTMENT_STATUS.PENDING, APPOINTMENT_STATUS.ACCEPTED, APPOINTMENT_STATUS.CONFIRMED] }
     }).select('date time');
 
     const bookedSlots = appointments.map(apt => apt.time);

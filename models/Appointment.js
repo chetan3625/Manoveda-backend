@@ -29,6 +29,11 @@ const appointmentSchema = new mongoose.Schema({
     enum: Object.values(APPOINTMENT_STATUS),
     default: APPOINTMENT_STATUS.PENDING
   },
+  consultationMode: {
+    type: String,
+    enum: ['instant', 'scheduled'],
+    default: 'scheduled'
+  },
   type: {
     type: String,
     enum: ['video', 'chat', 'audio'],
@@ -43,9 +48,19 @@ const appointmentSchema = new mongoose.Schema({
   notes: {
     type: String
   },
+  rejectionReason: {
+    type: String
+  },
+  doctorDecisionAt: {
+    type: Date
+  },
   prescription: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Prescription'
+  },
+  chat: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Chat'
   },
   fee: {
     type: Number,

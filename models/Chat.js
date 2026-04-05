@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
 
 const chatSchema = new mongoose.Schema({
+  appointment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Appointment'
+  },
   participants: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -25,6 +29,10 @@ const chatSchema = new mongoose.Schema({
   admin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  isUnlocked: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

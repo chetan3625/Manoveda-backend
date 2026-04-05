@@ -29,7 +29,7 @@ const paymentSchema = new mongoose.Schema({
   },
   method: {
     type: String,
-    enum: ['card', 'upi', 'netbanking', 'wallet', 'cod'],
+    enum: ['card', 'upi', 'netbanking', 'wallet', 'cod', 'razorpay'],
   },
   transactionId: {
     type: String

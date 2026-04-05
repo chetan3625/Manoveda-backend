@@ -1,4 +1,5 @@
-const { Chat, Message, User } = require('../models');
+const { Chat, Message, User, Appointment } = require('../models');
+const { APPOINTMENT_STATUS, ROLES } = require('../config/constants');
 
 const isChatParticipant = (chat, userId) => {
   return chat.participants.some(
@@ -8,7 +9,54 @@ const isChatParticipant = (chat, userId) => {
 
 exports.createChat = async (req, res, next) => {
   try {
-    const { participantId } = req.body;
+    const { participantId, appointmentId } = req.body;
+
+    const participant = await User.findById(participantId);
+    if (!participant) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (
+      [req.user.role, participant.role].includes(ROLES.DOCTOR) &&
+      [req.user.role, participant.role].includes(ROLES.PATIENT)
+    ) {
+      const eligibilityQuery = appointmentId
+        ? {
+            _id: appointmentId,
+            doctor: req.user.role === ROLES.DOCTOR ? req.user.id : participantId,
+            patient: req.user.role === ROLES.PATIENT ? req.user.id : participantId,
+            status: APPOINTMENT_STATUS.CONFIRMED,
+            paymentStatus: 'paid'
+          }
+        : {
+            doctor: req.user.role === ROLES.DOCTOR ? req.user.id : participantId,
+            patient: req.user.role === ROLES.PATIENT ? req.user.id : participantId,
+            status: APPOINTMENT_STATUS.CONFIRMED,
+            paymentStatus: 'paid'
+          };
+
+      const eligibleAppointment = await Appointment.findOne(eligibilityQuery);
+      if (!eligibleAppointment) {
+        return res.status(403).json({
+          success: false,
+          message: 'Chat unlocks only after the doctor accepts and payment is completed'
+        });
+      }
+
+      const existingAppointmentChat = eligibleAppointment.chat
+        ? await Chat.findById(eligibleAppointment.chat)
+        : null;
+
+      if (existingAppointmentChat) {
+        return res.json({
+          success: true,
+          chat: existingAppointmentChat
+        });
+      }
+    }
 
     const existingChat = await Chat.findOne({
       participants: { $all: [req.user.id, participantId] }
@@ -21,19 +69,12 @@ exports.createChat = async (req, res, next) => {
       });
     }
 
-    const participant = await User.findById(participantId);
-    if (!participant) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
     const chat = await Chat.create({
       participants: [req.user.id, participantId],
       lastMessage: '',
       lastMessageAt: new Date(),
-      lastMessageBy: req.user.id
+      lastMessageBy: req.user.id,
+      isUnlocked: true
     });
 
     res.status(201).json({
@@ -129,6 +170,13 @@ exports.sendMessage = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to send message to this chat'
+      });
+    }
+
+    if (chat.isUnlocked === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Chat is locked until the appointment is confirmed and paid'
       });
     }
 
