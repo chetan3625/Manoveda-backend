@@ -519,3 +519,541 @@ exports.getAvailability = async (req, res, next) => {
     next(error);
   }
 };
+
+// Micro-Features: Search & Filter
+
+exports.searchPatients = async (req, res, next) => {
+  try {
+    const { query } = req.query;
+    
+    const appointments = await Appointment.find({ doctor: req.user.id })
+      .populate('patient', 'name email avatar phone dateOfBirth gender')
+      .sort('-createdAt');
+    
+    let patients = appointments.map(apt => apt.patient);
+    patients = [...new Map(patients.map(p => [p._id.toString(), p])).values()];
+    
+    if (query) {
+      patients = patients.filter(p => 
+        p.name.toLowerCase().includes(query.toLowerCase()) ||
+        p.email.toLowerCase().includes(query.toLowerCase()) ||
+        p.phone.includes(query)
+      );
+    }
+    
+    res.json({
+      success: true,
+      patients
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getPatientDetails = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const appointments = await Appointment.find({
+      doctor: req.user.id,
+      patient: id
+    })
+      .populate('patient', 'name email avatar phone dateOfBirth gender address')
+      .populate('prescription')
+      .sort('-date');
+    
+    if (!appointments.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Patient not found'
+      });
+    }
+    
+    const patient = appointments[0].patient;
+    const history = appointments.map(apt => ({
+      _id: apt._id,
+      date: apt.date,
+      time: apt.time,
+      status: apt.status,
+      notes: apt.notes,
+      prescription: apt.prescription
+    }));
+    
+    res.json({
+      success: true,
+      patient,
+      appointmentHistory: history,
+      totalAppointments: appointments.length
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.searchAppointments = async (req, res, next) => {
+  try {
+    const { query, status, dateFrom, dateTo } = req.query;
+    
+    let filter = { doctor: req.user.id };
+    
+    if (status) {
+      filter.status = status;
+    }
+    
+    if (dateFrom || dateTo) {
+      filter.date = {};
+      if (dateFrom) filter.date.$gte = new Date(dateFrom);
+      if (dateTo) {
+        const endDate = new Date(dateTo);
+        endDate.setDate(endDate.getDate() + 1);
+        filter.date.$lt = endDate;
+      }
+    }
+    
+    let appointments = await Appointment.find(filter)
+      .populate('patient', 'name email phone')
+      .populate('chat')
+      .sort('-date');
+    
+    if (query) {
+      appointments = appointments.filter(apt =>
+        apt.patient.name.toLowerCase().includes(query.toLowerCase()) ||
+        apt.patient.email.toLowerCase().includes(query.toLowerCase()) ||
+        apt.patient.phone.includes(query)
+      );
+    }
+    
+    res.json({
+      success: true,
+      appointments,
+      count: appointments.length
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Micro-Features: Appointment Management
+
+exports.markAppointmentPriority = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { isPriority } = req.body;
+    
+    const appointment = await Appointment.findOneAndUpdate(
+      { _id: id, doctor: req.user.id },
+      { isPriority },
+      { new: true }
+    ).populate('patient', 'name email');
+    
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: `Appointment marked as ${isPriority ? 'priority' : 'normal'}`,
+      appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.bulkAppointmentAction = async (req, res, next) => {
+  try {
+    const { appointmentIds, action } = req.body;
+    
+    const updateData = {};
+    if (action === 'accept') {
+      updateData.status = APPOINTMENT_STATUS.ACCEPTED;
+      updateData.doctorDecisionAt = new Date();
+    } else if (action === 'reject') {
+      updateData.status = APPOINTMENT_STATUS.REJECTED;
+      updateData.doctorDecisionAt = new Date();
+    } else if (action === 'mark-priority') {
+      updateData.isPriority = true;
+    } else if (action === 'remove-priority') {
+      updateData.isPriority = false;
+    }
+    
+    const result = await Appointment.updateMany(
+      { _id: { $in: appointmentIds }, doctor: req.user.id },
+      updateData
+    );
+    
+    // Send notifications
+    for (const aptId of appointmentIds) {
+      const apt = await Appointment.findById(aptId);
+      if (apt) {
+        const message = action === 'accept' ? 'Your doctor accepted your request. Complete payment to unlock chat.'
+          : action === 'reject' ? 'Your doctor rejected your request.'
+          : action === 'mark-priority' ? 'Your appointment marked as priority.'
+          : 'Priority status removed from your appointment.';
+        
+        await sendNotification(apt.patient, 'Appointment Updated', message, 'appointment', aptId);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Bulk action completed for ${result.modifiedCount} appointments`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.markAppointmentComplete = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const appointment = await Appointment.findOneAndUpdate(
+      { _id: id, doctor: req.user.id },
+      { status: APPOINTMENT_STATUS.COMPLETED, completedAt: new Date() },
+      { new: true }
+    ).populate('patient', 'name email');
+    
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+    
+    await sendNotification(
+      appointment.patient,
+      'Consultation Completed',
+      'Your consultation has been marked as completed.',
+      'appointment',
+      appointment._id
+    );
+    
+    res.json({
+      success: true,
+      message: 'Appointment marked as completed',
+      appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.rescheduleAppointment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { newDate, newTime, reason } = req.body;
+    
+    const appointment = await Appointment.findOne({ _id: id, doctor: req.user.id });
+    
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+    
+    const oldDate = appointment.date;
+    const oldTime = appointment.time;
+    
+    appointment.date = newDate;
+    appointment.time = newTime;
+    appointment.rescheduledAt = new Date();
+    appointment.rescheduleReason = reason;
+    appointment.rescheduleHistory = appointment.rescheduleHistory || [];
+    appointment.rescheduleHistory.push({ oldDate, oldTime, newDate, newTime });
+    
+    await appointment.save();
+    
+    await sendNotification(
+      appointment.patient,
+      'Appointment Rescheduled',
+      `Your appointment has been rescheduled to ${newDate} at ${newTime}. Reason: ${reason}`,
+      'appointment',
+      appointment._id
+    );
+    
+    res.json({
+      success: true,
+      message: 'Appointment rescheduled successfully',
+      appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getUpcomingAppointmentsDetails = async (req, res, next) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const thirtyDaysLater = new Date(today);
+    thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+    
+    const appointments = await Appointment.find({
+      doctor: req.user.id,
+      date: { $gte: today, $lt: thirtyDaysLater },
+      status: { $in: [APPOINTMENT_STATUS.PENDING, APPOINTMENT_STATUS.ACCEPTED, APPOINTMENT_STATUS.CONFIRMED] }
+    })
+      .populate('patient', 'name email phone avatar')
+      .populate('chat')
+      .sort('date time');
+    
+    const grouped = {};
+    appointments.forEach(apt => {
+      const dateStr = apt.date.toISOString().split('T')[0];
+      if (!grouped[dateStr]) grouped[dateStr] = [];
+      grouped[dateStr].push(apt);
+    });
+    
+    res.json({
+      success: true,
+      upcoming: appointments,
+      groupedByDate: grouped,
+      count: appointments.length
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Micro-Features: Feedback Management
+
+exports.searchFeedbacks = async (req, res, next) => {
+  try {
+    const { query, ratingFrom, ratingTo } = req.query;
+    
+    let feedbacks = await Feedback.find({ doctor: req.user.id })
+      .populate('user', 'name email avatar')
+      .sort('-createdAt');
+    
+    if (query) {
+      feedbacks = feedbacks.filter(f =>
+        f.user.name.toLowerCase().includes(query.toLowerCase()) ||
+        f.feedback.toLowerCase().includes(query.toLowerCase())
+      );
+    }
+    
+    if (ratingFrom || ratingTo) {
+      feedbacks = feedbacks.filter(f => {
+        const rating = f.rating;
+        const afterFrom = !ratingFrom || rating >= parseInt(ratingFrom);
+        const beforeTo = !ratingTo || rating <= parseInt(ratingTo);
+        return afterFrom && beforeTo;
+      });
+    }
+    
+    res.json({
+      success: true,
+      feedbacks,
+      count: feedbacks.length
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.replyToFeedback = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reply } = req.body;
+    
+    const feedback = await Feedback.findOneAndUpdate(
+      { _id: id, doctor: req.user.id },
+      { 
+        reply,
+        repliedAt: new Date(),
+        repliedBy: req.user.id
+      },
+      { new: true }
+    ).populate('user', 'name email');
+    
+    if (!feedback) {
+      return res.status(404).json({
+        success: false,
+        message: 'Feedback not found'
+      });
+    }
+    
+    await sendNotification(
+      feedback.user,
+      'Doctor Reply',
+      `Dr. ${req.user.name} replied to your feedback`,
+      'feedback',
+      feedback._id
+    );
+    
+    res.json({
+      success: true,
+      message: 'Reply added successfully',
+      feedback
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.deleteFeedback = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const feedback = await Feedback.findOneAndDelete({
+      _id: id,
+      doctor: req.user.id
+    });
+    
+    if (!feedback) {
+      return res.status(404).json({
+        success: false,
+        message: 'Feedback not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Feedback deleted successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Micro-Features: Notification Management
+
+exports.searchNotifications = async (req, res, next) => {
+  try {
+    const { query, type } = req.query;
+    
+    let filter = { user: req.user.id };
+    if (type) filter.type = type;
+    
+    let notifications = await Notification.find(filter)
+      .sort('-createdAt')
+      .limit(100);
+    
+    if (query) {
+      notifications = notifications.filter(n =>
+        n.title.toLowerCase().includes(query.toLowerCase()) ||
+        n.message.toLowerCase().includes(query.toLowerCase())
+      );
+    }
+    
+    res.json({
+      success: true,
+      notifications,
+      count: notifications.length
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.markAllNotificationsRead = async (req, res, next) => {
+  try {
+    const result = await Notification.updateMany(
+      { user: req.user.id, isRead: false },
+      { isRead: true }
+    );
+    
+    res.json({
+      success: true,
+      message: `${result.modifiedCount} notifications marked as read`,
+      markedCount: result.modifiedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.deleteNotification = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const notification = await Notification.findOneAndDelete({
+      _id: id,
+      user: req.user.id
+    });
+    
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notification not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Notification deleted successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Micro-Features: Statistics & Analytics
+
+exports.getDashboardStats = async (req, res, next) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    
+    let filter = { doctor: req.user.id };
+    
+    if (dateFrom || dateTo) {
+      filter.date = {};
+      if (dateFrom) filter.date.$gte = new Date(dateFrom);
+      if (dateTo) {
+        const endDate = new Date(dateTo);
+        endDate.setDate(endDate.getDate() + 1);
+        filter.date.$lt = endDate;
+      }
+    }
+    
+    const allAppointments = await Appointment.find(filter);
+    const confirmedAppointments = await Appointment.countDocuments({
+      ...filter,
+      status: APPOINTMENT_STATUS.CONFIRMED
+    });
+    const completedAppointments = await Appointment.countDocuments({
+      ...filter,
+      status: APPOINTMENT_STATUS.COMPLETED
+    });
+    const pendingAppointments = await Appointment.countDocuments({
+      ...filter,
+      status: APPOINTMENT_STATUS.PENDING
+    });
+    const rejectedAppointments = await Appointment.countDocuments({
+      ...filter,
+      status: APPOINTMENT_STATUS.REJECTED
+    });
+    
+    const totalEarnings = allAppointments.reduce((sum, apt) => {
+      return sum + (apt.paymentStatus === 'paid' ? (apt.consultationFee || 0) : 0);
+    }, 0);
+    
+    const feedbacks = await Feedback.find({ doctor: req.user.id });
+    const avgRating = feedbacks.length > 0
+      ? (feedbacks.reduce((sum, f) => sum + f.rating, 0) / feedbacks.length).toFixed(2)
+      : 0;
+    
+    res.json({
+      success: true,
+      stats: {
+        totalAppointments: allAppointments.length,
+        confirmed: confirmedAppointments,
+        completed: completedAppointments,
+        pending: pendingAppointments,
+        rejected: rejectedAppointments,
+        totalEarnings,
+        averageRating: avgRating,
+        totalFeedbacks: feedbacks.length
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};

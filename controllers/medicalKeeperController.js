@@ -1,6 +1,128 @@
 const { User, Medicine, Order, Notification } = require('../models');
 const { ROLES } = require('../config/constants');
 
+exports.getDashboard = async (req, res, next) => {
+  try {
+    const { timeRange = '7days' } = req.query;
+    
+    let startDate = new Date();
+    if (timeRange === '30days') {
+      startDate.setDate(startDate.getDate() - 30);
+    } else if (timeRange === '7days') {
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (timeRange === 'today') {
+      startDate.setHours(0, 0, 0, 0);
+    }
+
+    const allOrders = await Order.find()
+      .populate('user', 'name email phone')
+      .populate('items.medicine');
+    
+    const myOrders = allOrders.filter(order =>
+      order.items.some(item => item.medicine?.addedBy?.toString() === req.user.id.toString())
+    );
+    
+    const filteredOrders = myOrders.filter(order => order.createdAt >= startDate);
+    
+    const totalRevenue = filteredOrders
+      .filter(o => o.paymentStatus === 'paid')
+      .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    
+    const totalOrders = filteredOrders.length;
+    const pendingOrders = filteredOrders.filter(o => o.status === 'confirmed').length;
+    const shippedOrders = filteredOrders.filter(o => o.status === 'shipped').length;
+    const deliveredOrders = filteredOrders.filter(o => o.status === 'delivered').length;
+    
+    const medicines = await Medicine.find({ addedBy: req.user.id });
+    const totalMedicines = medicines.length;
+    const lowStock = medicines.filter(m => (m.stock || 0) < 10).length;
+    const outOfStock = medicines.filter(m => (m.stock || 0) === 0).length;
+    
+    const recentOrders = myOrders.slice(0, 10);
+    
+    const topSelling = [];
+    const medicineSales = {};
+    allOrders.forEach(order => {
+      order.items.forEach(item => {
+        if (item.medicine?.addedBy?.toString() === req.user.id.toString()) {
+          const id = item.medicine._id.toString();
+          if (!medicineSales[id]) {
+            medicineSales[id] = { name: item.medicine.name, quantity: 0, revenue: 0 };
+          }
+          medicineSales[id].quantity += item.quantity;
+          medicineSales[id].revenue += item.totalPrice;
+        }
+      });
+    });
+    Object.values(medicineSales)
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5)
+      .forEach(m => topSelling.push(m));
+
+    res.json({
+      success: true,
+      stats: {
+        totalRevenue,
+        totalOrders,
+        pendingOrders,
+        shippedOrders,
+        deliveredOrders,
+        totalMedicines,
+        lowStock,
+        outOfStock
+      },
+      recentOrders,
+      topSelling
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getSalesAnalytics = async (req, res, next) => {
+  try {
+    const { period = '7days' } = req.query;
+    
+    const days = period === '30days' ? 30 : period === '90days' ? 90 : 7;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    const allOrders = await Order.find({ createdAt: { $gte: startDate }, paymentStatus: 'paid' })
+      .populate('items.medicine');
+    
+    const myOrders = allOrders.filter(order =>
+      order.items.some(item => item.medicine?.addedBy?.toString() === req.user.id.toString())
+    );
+    
+    const dailySales = {};
+    for (let i = 0; i < days; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const key = date.toISOString().split('T')[0];
+      dailySales[key] = { orders: 0, revenue: 0 };
+    }
+    
+    myOrders.forEach(order => {
+      const key = order.createdAt.toISOString().split('T')[0];
+      if (dailySales[key]) {
+        dailySales[key].orders += 1;
+        dailySales[key].revenue += order.totalAmount || 0;
+      }
+    });
+    
+    const chartData = Object.entries(dailySales)
+      .map(([date, data]) => ({ date, ...data }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    
+    res.json({
+      success: true,
+      chartData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getProfile = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);

@@ -11,6 +11,7 @@ router.use(authorize(ROLES.MEDICAL_KEEPER));
 router.get('/profile', medicalKeeperController.getProfile);
 router.put('/profile', medicalKeeperController.updateProfile);
 router.get('/dashboard', medicalKeeperController.getDashboard);
+router.get('/analytics', medicalKeeperController.getSalesAnalytics);
 router.post('/medicines', medicalKeeperController.addMedicine);
 router.put('/medicines/:id', medicalKeeperController.updateMedicine);
 router.delete('/medicines/:id', medicalKeeperController.deleteMedicine);
