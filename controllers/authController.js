@@ -3,7 +3,7 @@ const { User } = require('../models');
 const { JWT_SECRET, JWT_EXPIRE, ROLES } = require('../config/constants');
 
 const generateToken = (id) => {
-  return jwt.sign({ id }, JWT_SECRET, { expiresIn: JWT_EXPIRE });
+  return jwt.sign({ id }, JWT_SECRET);
 };
 
 exports.register = async (req, res, next) => {
