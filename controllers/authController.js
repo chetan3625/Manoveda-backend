@@ -48,7 +48,8 @@ exports.register = async (req, res, next) => {
       specialization,
       experience,
       qualification,
-      consultationFee: userRole === ROLES.DOCTOR ? consultationFee : 0
+      consultationFee: userRole === ROLES.DOCTOR ? consultationFee : 0,
+      isAvailable: userRole === ROLES.DOCTOR ? true : undefined
     });
 
     const token = generateToken(user._id);

@@ -40,7 +40,10 @@ exports.getDoctors = async (req, res, next) => {
   try {
     const { search, specialization, page = 1, limit = 10 } = req.query;
 
-    const query = { role: ROLES.DOCTOR, isAvailable: true };
+    const query = {
+      role: ROLES.DOCTOR,
+      isAvailable: { $ne: false }
+    };
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
