@@ -104,6 +104,24 @@ exports.getDoctorProfile = async (req, res, next) => {
 exports.bookAppointment = async (req, res, next) => {
   try {
     const { doctorId, date, time, duration, type, symptoms, consultationMode = 'scheduled' } = req.body;
+    const requestedDate = new Date(date);
+    const normalizedTime = typeof time === 'string' && time.trim()
+      ? time.trim()
+      : `${String(requestedDate.getHours()).padStart(2, '0')}:${String(requestedDate.getMinutes()).padStart(2, '0')}`;
+
+    if (!doctorId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Doctor is required'
+      });
+    }
+
+    if (Number.isNaN(requestedDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please choose a valid appointment date and time'
+      });
+    }
 
     const doctor = await User.findById(doctorId);
     if (!doctor || doctor.role !== ROLES.DOCTOR) {
@@ -116,8 +134,8 @@ exports.bookAppointment = async (req, res, next) => {
     const existingAppointment = await Appointment.findOne({
       doctor: doctorId,
       patient: req.user.id,
-      date,
-      time,
+      date: requestedDate,
+      time: normalizedTime,
       status: { $in: [APPOINTMENT_STATUS.PENDING, APPOINTMENT_STATUS.ACCEPTED, APPOINTMENT_STATUS.CONFIRMED] }
     });
 
@@ -131,8 +149,8 @@ exports.bookAppointment = async (req, res, next) => {
     const appointment = await Appointment.create({
       patient: req.user.id,
       doctor: doctorId,
-      date,
-      time,
+      date: requestedDate,
+      time: normalizedTime,
       duration,
       type,
       consultationMode,
@@ -150,7 +168,16 @@ exports.bookAppointment = async (req, res, next) => {
       'New Appointment Request',
       `${req.user.name} requested a ${type} consultation.`,
       'appointment',
-      appointment._id
+      appointment._id,
+      {
+        appointmentId: appointment._id,
+        patientId: req.user.id,
+        patientName: req.user.name,
+        type,
+        consultationMode,
+        date: requestedDate,
+        time: normalizedTime
+      }
     );
 
     res.status(201).json({
